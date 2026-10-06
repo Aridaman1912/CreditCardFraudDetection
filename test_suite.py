@@ -1,75 +1,61 @@
 import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+sys.path.insert(0, ".")
 import pandas as pd
-import numpy as np
-from src.predict import (
-    load_artifacts, predict_fraud, predict_dataframe,
-    validate_features, REQUIRED_FEATURES,
-)
+from src.predict import load_artifacts, predict_fraud
 
-print("TEST 1 — Load artifacts")
 art = load_artifacts()
-print(f"  threshold={art['threshold']}, features={len(art['feature_names'])}")
-assert art["threshold"] == 0.89
-assert len(art["feature_names"]) == 30
-print("  PASSED")
+df  = pd.read_csv("data/sample_transactions.csv")
 
-print("\nTEST 2 — Genuine sample")
-sample = pd.read_csv("data/sample_transactions.csv")
-genuine_row = sample[sample["label"] == "genuine"].iloc[0].to_dict()
-res = predict_fraud(genuine_row, art)
-print(f"  prob={res['fraud_probability_pct']:.2f}% prediction={res['prediction']}")
-assert res["prediction"] == "GENUINE"
-print("  PASSED")
+genuine = df[df["label"] == "genuine"].reset_index(drop=True)
+fraud   = df[df["label"] == "fraud"].reset_index(drop=True)
 
-print("\nTEST 3 — Fraud sample")
-fraud_row = sample[sample["label"] == "fraud"].iloc[0].to_dict()
-res = predict_fraud(fraud_row, art)
-print(f"  prob={res['fraud_probability_pct']:.2f}% prediction={res['prediction']}")
-assert res["prediction"] == "FRAUD"
-print("  PASSED")
+print("TEST 1 — Genuine transaction")
+r = predict_fraud(genuine.iloc[0].to_dict(), art)
+print(f"  Prob: {r['fraud_probability_pct']:.2f}%  Prediction: {r['prediction']}")
+assert r["prediction"] == "GENUINE", "FAIL"
+print("  PASS\n")
 
-print("\nTEST 4 — Batch prediction with Class column present")
-batch = pd.read_csv("sample_data/batch_test_sample.csv")
-assert "Class" in batch.columns
-out, summary = predict_dataframe(batch, art)
-print(f"  total={summary['total']}, flagged={summary['flagged_fraud']}")
-assert "Fraud Probability" in out.columns
-assert "Prediction" in out.columns
-assert "Class" not in [c for c in out.columns if c == "Class" and c not in out[["Fraud Probability","Prediction"]].columns]
-print("  PASSED")
+print("TEST 2 — Fraudulent transaction")
+r = predict_fraud(fraud.iloc[0].to_dict(), art)
+print(f"  Prob: {r['fraud_probability_pct']:.2f}%  Prediction: {r['prediction']}")
+assert r["prediction"] == "FRAUD", "FAIL"
+print("  PASS\n")
 
-print("\nTEST 5 — Missing column validation")
-bad_df = pd.DataFrame({"Time": [0], "Amount": [100]})
-ok, msg, missing = validate_features(bad_df, art["feature_names"])
-assert not ok
-assert len(missing) > 0
-print(f"  Correctly rejected — {msg[:60]}")
-print("  PASSED")
+print("TEST 3 — Random (all 10 sample rows)")
+all_df = pd.concat([genuine, fraud], ignore_index=True)
+for i in range(len(all_df)):
+    row = all_df.iloc[i].to_dict()
+    r   = predict_fraud(row, art)
+    print(f"  [{row.get('label')}]  Prob={r['fraud_probability_pct']:.2f}%  -> {r['prediction']}")
+print("  PASS\n")
 
-print("\nTEST 6 — Non-numeric column rejection")
-bad_df2 = pd.read_csv("data/sample_transactions.csv").drop(columns=["label", "Class"], errors="ignore")
-bad_df2["V1"] = "not_a_number"
-ok, msg, _ = validate_features(bad_df2, art["feature_names"])
-assert not ok
-print(f"  Correctly rejected — {msg[:60]}")
-print("  PASSED")
+print("TEST 4 — No manual V1-V28 number_input fields in app.py")
+code = open("app.py", encoding="utf-8").read()
+assert "number_input" not in code, "FAIL — number_input still present"
+print("  PASS\n")
 
-print("\nTEST 7 — Class column is dropped before prediction")
-batch_with_class = pd.read_csv("sample_data/batch_test_sample.csv")
-out2, _ = predict_dataframe(batch_with_class, art)
-input_cols = set(out2.columns) - {"Fraud Probability", "Fraud Probability (%)", "Prediction"}
-assert "Class" in input_cols or "Class" not in art["feature_names"]
-print("  PASSED (Class not used as model input)")
+print("TEST 5 — No CSV upload on main prediction page")
+assert "file_uploader" not in code, "FAIL — file_uploader still present"
+print("  PASS\n")
 
-print("\nTEST 8 — Threshold is 0.89")
-assert art["threshold"] == 0.89
-prob_above = art["threshold"] + 0.001
-prob_below = art["threshold"] - 0.001
-assert (prob_above >= art["threshold"]) == True
-assert (prob_below >= art["threshold"]) == False
-print("  PASSED")
+print("TEST 6 — Threshold is 0.89")
+assert art["threshold"] == 0.89, f"FAIL — got {art['threshold']}"
+print(f"  Threshold = {art['threshold']}  PASS\n")
 
-print("\n=== ALL TESTS PASSED ===")
+print("TEST 7 — 30 features in artifact")
+assert len(art["feature_names"]) == 30, "FAIL"
+print(f"  Features = {len(art['feature_names'])}  PASS\n")
+
+print("TEST 8 — Cycling through genuine samples")
+for i in range(len(genuine)):
+    r = predict_fraud(genuine.iloc[i].to_dict(), art)
+    assert r["prediction"] == "GENUINE", f"FAIL on genuine row {i}"
+print(f"  All {len(genuine)} genuine rows -> GENUINE  PASS\n")
+
+print("TEST 9 — Cycling through fraud samples")
+for i in range(len(fraud)):
+    r = predict_fraud(fraud.iloc[i].to_dict(), art)
+    assert r["prediction"] == "FRAUD", f"FAIL on fraud row {i}"
+print(f"  All {len(fraud)} fraud rows -> FRAUD  PASS\n")
+
+print("=== ALL 9 TESTS PASSED ===")
