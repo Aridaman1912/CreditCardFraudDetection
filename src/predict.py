@@ -10,6 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL_JSON = BASE_DIR / "models" / "xgb_model.json"
 DEFAULT_CONFIG_JSON = BASE_DIR / "models" / "pipeline_config.json"
 DEFAULT_PIPELINE_PKL = BASE_DIR / "models" / "paysim_pipeline.pkl"
+DEFAULT_PIPELINE_PATH = DEFAULT_CONFIG_JSON
 
 USER_INPUT_COLS = [
     "type", "amount",
@@ -21,15 +22,25 @@ TRANSACTION_TYPES = ["CASH-OUT", "CASH-IN", "PAYMENT", "TRANSFER", "DEBIT"]
 
 
 def load_pipeline(
-    model_path: Union[str, Path] = DEFAULT_MODEL_JSON,
-    config_path: Union[str, Path] = DEFAULT_CONFIG_JSON
+    pipeline_path: Union[str, Path] = None,
+    config_path: Union[str, Path] = None,
 ) -> Dict[str, Any]:
-    model_path = Path(model_path)
-    config_path = Path(config_path)
+    model_path = DEFAULT_MODEL_JSON
+    cfg_path = DEFAULT_CONFIG_JSON
+
+    if pipeline_path is not None:
+        p = Path(pipeline_path)
+        if p.suffix == ".json" and "model" in p.name:
+            model_path = p
+        elif p.suffix == ".json":
+            cfg_path = p
+
+    if config_path is not None:
+        cfg_path = Path(config_path)
 
     # Preferred: Load via native JSON (version-independent)
-    if model_path.exists() and config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
+    if model_path.exists() and cfg_path.exists():
+        with open(cfg_path, "r", encoding="utf-8") as f:
             config = json.load(f)
 
         model = XGBClassifier()
