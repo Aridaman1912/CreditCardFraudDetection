@@ -28,30 +28,36 @@ def load_artifacts(model_path: Union[str, Path] = DEFAULT_MODEL_PATH) -> Dict[st
 
     for k in ["model", "scaler", "feature_names", "threshold"]:
         if k not in artifacts:
-            raise KeyError(f"Artifact dictionary is missing key: '{k}'")
+            raise KeyError(f"Artifact is missing key: '{k}'")
 
     return artifacts
 
 
-def validate_input_data(
+def validate_features(
     input_data: Union[Dict[str, Any], pd.DataFrame],
-    expected_features: List[str] = REQUIRED_FEATURES
+    feature_names: List[str]
 ) -> Tuple[bool, str, List[str]]:
     if isinstance(input_data, dict):
-        missing = [col for col in expected_features if col not in input_data]
+        cols = list(input_data.keys())
     elif isinstance(input_data, pd.DataFrame):
-        missing = [col for col in expected_features if col not in input_data.columns]
+        cols = list(input_data.columns)
     else:
-        return False, "Input must be a dictionary or a pandas DataFrame.", []
+        return False, "Input must be a dict or DataFrame.", []
 
+    missing = [f for f in feature_names if f not in cols]
     if missing:
-        return False, f"Missing {len(missing)} required features: {missing[:5]}...", missing
+        return False, f"Missing required columns: {missing}", missing
 
-    return True, "All required features are present and valid.", []
+    if isinstance(input_data, pd.DataFrame):
+        for f in feature_names:
+            if not pd.api.types.is_numeric_dtype(input_data[f]):
+                return False, f"Column '{f}' contains non-numeric values.", [f]
+
+    return True, "OK", []
 
 
-def predict_single_transaction(
-    features: Union[Dict[str, Any], pd.DataFrame, List[float]],
+def predict_fraud(
+    transaction: Union[Dict[str, Any], pd.DataFrame],
     artifacts: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     if artifacts is None:
@@ -62,54 +68,39 @@ def predict_single_transaction(
     feature_names = artifacts["feature_names"]
     threshold = float(artifacts.get("threshold", 0.89))
 
-    if isinstance(features, dict):
-        is_valid, msg, missing = validate_input_data(features, feature_names)
+    if isinstance(transaction, dict):
+        is_valid, msg, _ = validate_features(transaction, feature_names)
         if not is_valid:
             raise ValueError(msg)
-        ordered_values = [float(features[col]) for col in feature_names]
-        input_df = pd.DataFrame([ordered_values], columns=feature_names)
-    elif isinstance(features, pd.DataFrame):
-        is_valid, msg, missing = validate_input_data(features, feature_names)
+        ordered = [float(transaction[col]) for col in feature_names]
+        input_df = pd.DataFrame([ordered], columns=feature_names)
+    elif isinstance(transaction, pd.DataFrame):
+        is_valid, msg, _ = validate_features(transaction, feature_names)
         if not is_valid:
             raise ValueError(msg)
-        input_df = features[feature_names].iloc[0:1].astype(float)
-    elif isinstance(features, (list, np.ndarray)):
-        if len(features) != len(feature_names):
-            raise ValueError(f"Expected {len(feature_names)} features, but received {len(features)}.")
-        input_df = pd.DataFrame([list(features)], columns=feature_names, dtype=float)
+        input_df = transaction[feature_names].iloc[0:1].astype(float)
+    elif isinstance(transaction, (list, np.ndarray)):
+        if len(transaction) != len(feature_names):
+            raise ValueError(f"Expected {len(feature_names)} features, got {len(transaction)}.")
+        input_df = pd.DataFrame([list(transaction)], columns=feature_names, dtype=float)
     else:
-        raise TypeError("features must be a dict, DataFrame, or list.")
+        raise TypeError("transaction must be a dict, DataFrame, or list.")
 
-    scaled_array = scaler.transform(input_df)
-    probabilities = model.predict_proba(scaled_array)
-    fraud_prob = float(probabilities[0, 1])
-    fraud_prob_pct = fraud_prob * 100.0
+    scaled = scaler.transform(input_df)
+    proba = model.predict_proba(scaled)
+    fraud_prob = float(proba[0, 1])
 
-    if fraud_prob >= threshold:
-        prediction = "FRAUD"
-        is_fraud = True
-        status_label = "⚠️ FRAUD DETECTED"
-        message = "The transaction has been classified as high risk."
-    else:
-        prediction = "GENUINE"
-        is_fraud = False
-        status_label = "✅ GENUINE TRANSACTION"
-        message = "The transaction appears to be low risk."
-
+    is_fraud = fraud_prob >= threshold
     return {
         "fraud_probability": fraud_prob,
-        "fraud_probability_pct": fraud_prob_pct,
-        "prediction": prediction,
+        "fraud_probability_pct": fraud_prob * 100.0,
+        "prediction": "FRAUD" if is_fraud else "GENUINE",
         "is_fraud": is_fraud,
-        "status_label": status_label,
-        "message": message,
         "threshold": threshold,
-        "scaled_features": scaled_array[0],
-        "feature_names": feature_names
     }
 
 
-def predict_batch(
+def predict_dataframe(
     df: pd.DataFrame,
     artifacts: Dict[str, Any] = None
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
@@ -121,32 +112,34 @@ def predict_batch(
     feature_names = artifacts["feature_names"]
     threshold = float(artifacts.get("threshold", 0.89))
 
-    is_valid, msg, missing = validate_input_data(df, feature_names)
+    df = df.drop(columns=["Class"], errors="ignore")
+
+    is_valid, msg, missing = validate_features(df, feature_names)
     if not is_valid:
-        raise ValueError(f"Batch validation failed: {msg}")
+        raise ValueError(msg)
 
     input_df = df[feature_names].astype(float)
     X_scaled = scaler.transform(input_df)
 
-    probabilities = model.predict_proba(X_scaled)[:, 1]
-    predictions = np.where(probabilities >= threshold, "FRAUD", "GENUINE")
+    proba = model.predict_proba(X_scaled)[:, 1]
+    preds = np.where(proba >= threshold, "FRAUD", "GENUINE")
 
-    output_df = df.copy()
-    output_df["Fraud Probability"] = np.round(probabilities, 4)
-    output_df["Fraud Probability (%)"] = np.round(probabilities * 100.0, 2)
-    output_df["Prediction"] = predictions
+    out = df.copy()
+    out["Fraud Probability"] = np.round(proba, 4)
+    out["Fraud Probability (%)"] = np.round(proba * 100.0, 2)
+    out["Prediction"] = preds
 
-    total_count = len(df)
-    fraud_count = int(np.sum(predictions == "FRAUD"))
-    genuine_count = total_count - fraud_count
-    fraud_rate_pct = (fraud_count / total_count * 100.0) if total_count > 0 else 0.0
-
+    n_fraud = int(np.sum(preds == "FRAUD"))
     summary = {
-        "total_transactions": total_count,
-        "flagged_fraud_count": fraud_count,
-        "genuine_count": genuine_count,
-        "fraud_rate_pct": fraud_rate_pct,
-        "threshold_used": threshold
+        "total": len(df),
+        "flagged_fraud": n_fraud,
+        "genuine": len(df) - n_fraud,
+        "fraud_rate_pct": (n_fraud / len(df) * 100.0) if len(df) > 0 else 0.0,
+        "threshold": threshold,
     }
 
-    return output_df, summary
+    return out, summary
+
+
+predict_single_transaction = predict_fraud
+predict_batch = predict_dataframe

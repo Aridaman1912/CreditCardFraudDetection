@@ -1,139 +1,211 @@
-# 🛡️ Credit Card Fraud Detection - ML Prediction Web App
+# Credit Card Fraud Detection — ML Portfolio Project
 
-An end-to-end Machine Learning web application built using **Streamlit** and **XGBoost** for real-time transaction risk prediction and fraud classification.
+An end-to-end machine learning project that trains an **XGBoost** classifier on the public
+ULB Credit Card Fraud dataset and deploys it as an interactive **Streamlit** web application.
 
----
-
-## 📌 Project Overview
-
-Credit card fraud is characterized by an extreme class imbalance, where fraudulent transactions represent a tiny fraction of total activity. This project takes the final trained research model and deploys it into an interactive prediction web application where users can:
-- Input transaction parameters to immediately compute fraud probability.
-- Classify transactions as **FRAUD** or **GENUINE** using an optimized decision threshold.
-- Perform batch scoring on uploaded CSV datasets.
-- Review model performance metrics, confusion matrix, and SHAP explainability insights.
+> **This is an ML portfolio / learning project.** It is not a real banking production system.
 
 ---
 
-## 📊 Dataset Details
+## Project Objective
 
-- **Dataset**: `creditcard.csv`
-- **Total Records**: 284,807 transactions (European cardholders over two days)
-- **Features (30 inputs)**:
-  - `Time`: Elapsed seconds from the initial recorded transaction.
-  - `V1` – `V28`: Anonymized numerical features resulting from Principal Component Analysis (PCA) to protect cardholder privacy.
-  - `Amount`: Transaction transaction amount in USD.
-- **Target (`Class`)**:
-  - `0`: Genuine / Legitimate
-  - `1`: Fraud (only 492 cases, representing **0.172%** of all transactions)
+Detect fraudulent credit card transactions using machine learning while addressing the severe
+class imbalance (only 0.173% of transactions are fraudulent) that makes standard accuracy metrics
+misleading.
 
 ---
 
-## 🧠 Machine Learning Approach
+## Dataset
 
-### 1. The Class Imbalance Problem
-Because 99.828% of transactions are genuine, standard models suffer from severe majority-class bias. A trivial baseline predicting all transactions as genuine would achieve 99.83% accuracy while failing to intercept any fraud.
-To address this:
-- **SMOTE (Synthetic Minority Over-sampling Technique)** was applied strictly on the training fold to generate synthetic fraud instances along minority class feature vectors.
-- Features were standardized using `StandardScaler`.
+| Property | Value |
+|----------|-------|
+| Source | ULB Machine Learning Group (Kaggle) |
+| Period | September 2013, European cardholders |
+| Transactions | 284,807 over 48 hours |
+| Fraud cases | 492 (0.173%) |
+| Features | `Time`, `V1`–`V28`, `Amount`, `Class` |
 
-### 2. Tuned XGBoost Model
-The final model is an optimized **XGBoost Classifier** with the following key hyperparameters:
-- `n_estimators`: 300
-- `max_depth`: 11
-- `learning_rate`: 0.10
-- `subsample`: 0.80
-- `colsample_bytree`: 0.80
-- `min_child_weight`: 5
-- `eval_metric`: logloss
-
-### 3. Threshold Optimization
-Default binary classification uses a threshold of $0.50$. For extreme class imbalance and financial risk trade-offs:
-- The decision boundary was tuned to **`0.89`**.
-- This eliminates more than 80% of false alarms (False Positives) while maintaining high fraud recall, minimizing both direct financial losses and customer friction.
+**Important — V1 to V28 are anonymized features.**
+They are the result of a PCA transformation applied by the original dataset authors to protect
+cardholder privacy. Their individual real-world meanings are not disclosed or interpretable.
 
 ---
 
-## 📈 Final Untouched Test-Set Performance
+## Class Imbalance Problem
 
-Evaluated on 56,962 untouched test transactions using threshold **`0.89`**:
+Because only 0.173% of transactions are fraudulent, a naive model that always predicts "genuine"
+achieves 99.83% accuracy while catching **zero frauds**. To address this:
+
+- **SMOTE** (Synthetic Minority Over-sampling Technique) is applied to the training fold only.
+- Evaluation focuses on **Precision**, **Recall**, **F1**, and **PR-AUC** rather than accuracy.
+- The decision threshold is tuned away from the default 0.50.
+
+---
+
+## Machine Learning Workflow
+
+1. Stratified train / test split (80 / 20)
+2. `StandardScaler` fitted on training data only — applied to all splits
+3. SMOTE applied to the scaled training fold to balance classes
+4. XGBoost trained on the resampled training set
+5. Decision threshold tuned on validation data to maximise F1
+6. Final evaluation on the untouched test set
+
+### XGBoost Hyperparameters (tuned)
+
+| Parameter | Value |
+|-----------|-------|
+| n_estimators | 300 |
+| max_depth | 11 |
+| learning_rate | 0.10 |
+| subsample | 0.80 |
+| colsample_bytree | 0.80 |
+| min_child_weight | 5 |
+| eval_metric | logloss |
+
+---
+
+## Final Test-Set Performance
+
+> Evaluated on 56,962 untouched test transactions at threshold **0.89**.
 
 | Metric | Score |
-| :--- | :---: |
-| **Accuracy** | **99.956%** |
-| **Precision** | **91.95%** |
-| **Recall** | **81.63%** |
-| **F1 Score** | **86.49%** |
-| **ROC-AUC** | **98.11%** |
-| **PR-AUC** | **87.51%** |
+|--------|-------|
+| Accuracy | **99.956%** |
+| Precision | **91.95%** |
+| Recall | **81.63%** |
+| F1 Score | **86.49%** |
+| ROC-AUC | **98.11%** |
+| PR-AUC | **87.51%** |
 
 ### Confusion Matrix
+
 ```
-                     Predicted Genuine (0)    Predicted Fraud (1)
-Actual Genuine (0)           56,857                    7
-Actual Fraud (1)               18                     80
+                  Predicted Genuine   Predicted Fraud
+Actual Genuine         56,857               7
+Actual Fraud               18              80
 ```
-- **True Negatives (TN)**: 56,857
-- **False Positives (FP)**: 7
-- **False Negatives (FN)**: 18
-- **True Positives (TP)**: 80
+
+- **True Negatives:** 56,857
+- **False Positives:** 7
+- **False Negatives:** 18
+- **True Positives:** 80
 
 ---
 
-## 📁 Project Structure
+## Threshold Optimization
 
-```text
-Credit-Card-Fraud-Detection/
-│
-├── data/
-│   └── creditcard.csv                       # Transaction dataset (284,807 rows)
-│
-├── models/
-│   └── fraud_detection_model.pkl            # Final model artifact (model, scaler, feature_names, threshold)
-│
-├── notebooks/
-│   └── Credit_Card_Fraud_Detection.ipynb    # Complete research, tuning & evaluation notebook
-│
-├── src/
-│   └── predict.py                           # Dedicated prediction, validation & batch scoring logic
-│
-├── app.py                                   # Streamlit prediction web application
-├── requirements.txt                         # Application dependencies
-└── README.md                                # Project documentation
+The default classification threshold is 0.50. Because the cost of missing real fraud (False Negative)
+far outweighs the cost of a false alarm (False Positive), the threshold is calibrated to **0.89**
+to maximise the F1 score on the validation set.
+
+---
+
+## Streamlit Application
+
+The web application provides:
+
+| Page | Description |
+|------|-------------|
+| **🔍 Prediction** | Try sample transactions or upload a CSV — no manual V1–V28 entry required |
+| **📁 Batch Prediction** | Score hundreds of transactions at once, download results |
+| **📊 Model Performance** | Metrics, confusion matrix, dataset imbalance explanation |
+| **🧬 Explainability** | SHAP feature importance rankings |
+| **ℹ️ About** | Project background and instructions |
+
+### Primary User Flow
+
+```
+Try Sample Transaction  OR  Upload CSV
+         ↓
+   Validate columns
+         ↓
+  Reorder by feature_names
+         ↓
+  Saved StandardScaler
+         ↓
+  Saved XGBoost model
+         ↓
+     predict_proba()
+         ↓
+  Threshold = 0.89
+         ↓
+  FRAUD / GENUINE result
 ```
 
 ---
 
-## 🚀 How to Run the Streamlit Application
+## How to Run Locally
 
-### 1. Install Dependencies
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. Launch the Application
-```bash
 streamlit run app.py
 ```
 
-Open your browser at **`http://localhost:8501`**.
+The app opens at **http://localhost:8501**.
 
 ---
 
-## 🖥️ Application Features & User Flow
+## How to Upload Your Own CSV
 
-1. **Transaction Risk Prediction (Primary Feature)**:
-   - Enter `Time`, `Amount`, and PCA features `V1` to `V28` (or use the 1-click **Load Genuine Sample** / **Load Fraud Sample** presets).
-   - Click **`🔍 Predict Transaction`**.
-   - Displays:
-     - **`Fraud Probability: XX.XX%`**
-     - **`⚠️ FRAUD DETECTED`** (High Risk, prob $\ge 0.89$) or **`✅ GENUINE TRANSACTION`** (Low Risk, prob $< 0.89$).
-     - Visual risk gauge indicator.
-2. **Model Performance**:
-   - Displays cards for Accuracy (99.956%), Precision (91.95%), Recall (81.63%), F1 (86.49%), ROC-AUC (98.11%), and PR-AUC (87.51%).
-3. **Confusion Matrix**:
-   - Interactive heatmap displaying the test set confusion matrix `[[56857, 7], [18, 80]]`.
-4. **Batch Prediction**:
-   - Upload any CSV containing the 30 features (or test with the built-in 200-transaction demo batch).
-   - Instant automated classification and CSV export.
-5. **Model Information & Explainability**:
-   - Specifications table and top 10 SHAP high-impact features (`V14`, `V4`, `V8`, `V12`, `V10`, `V1`, `V18`, `V3`, `V11`, `V22`).
+The CSV must contain these 30 columns (order does not matter, the app reorders them):
+
+```
+Time, V1, V2, V3, V4, V5, V6, V7, V8, V9, V10,
+V11, V12, V13, V14, V15, V16, V17, V18, V19, V20,
+V21, V22, V23, V24, V25, V26, V27, V28, Amount
+```
+
+- A `Class` column is **ignored** if present (not used as model input).
+- Extra columns are ignored.
+- Missing required columns produce a clear error message.
+- Non-numeric values produce a clear error message.
+
+### Example CSV format
+
+```csv
+Time,V1,V2,V3,...,V28,Amount
+0,-1.3598,0.0,2.536,...,-0.021,149.62
+1,1.1918,0.266,0.166,...,0.014,2.69
+```
+
+---
+
+## Project Structure
+
+```
+CreditCardFraudDetection/
+│
+├── app.py                          # Streamlit web application
+├── requirements.txt                # Dependencies
+├── README.md                       # This file
+│
+├── models/
+│   └── fraud_detection_model.pkl   # Trained model artifact
+│                                   # (contains: model, scaler, feature_names, threshold)
+│
+├── src/
+│   ├── __init__.py
+│   └── predict.py                  # predict_fraud(), predict_dataframe(), validate_features()
+│
+├── data/
+│   └── sample_transactions.csv     # 10 real sample rows (5 genuine, 5 fraud) for demo
+│
+├── sample_data/
+│   ├── fraud_samples.csv           # 15 confirmed fraud rows
+│   ├── legitimate_samples.csv      # 15 genuine rows
+│   └── batch_test_sample.csv       # 200 mixed rows for batch demo
+│
+└── notebooks/
+    └── Credit_Card_Fraud_Detection.ipynb   # Full research, EDA, and training notebook
+```
+
+---
+
+## Notes
+
+- The full `creditcard.csv` (144 MB) is not included in the repository.
+- The model artifact (`fraud_detection_model.pkl`, ~1.3 MB) contains the trained XGBoost model,
+  the fitted StandardScaler, the ordered feature name list, and the calibrated threshold.
+- SMOTE is applied only during training — it is not re-applied at inference time.
+- The scaler is not re-fitted at inference time.

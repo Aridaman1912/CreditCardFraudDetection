@@ -18,6 +18,7 @@ creditcard.csv
 data/creditcard.csv
 data/*.parquet
 data/*.csv
+!data/sample_transactions.csv
 !sample_data/*.csv
 
 # Streamlit local config
