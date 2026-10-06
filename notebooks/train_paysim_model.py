@@ -244,15 +244,23 @@ print(f"  Confusion Matrix:\n{cm}")
 # 9. SAVE COMPLETE PIPELINE
 # ─────────────────────────────────────────────────────────
 print("\nSaving pipeline...")
-artifact = {
-    "preprocessor":     preprocessor,
-    "model":            model,
-    "threshold":        float(best_thr),
-    "feature_cols":     FEATURE_COLS,
-    "cat_cols":         cat_cols,
-    "num_cols":         num_cols,
-    "user_input_cols":  ["type", "amount", "oldbalanceOrg", "newbalanceOrig",
-                         "oldbalanceDest", "newbalanceDest"],
+import json
+
+model.save_model("models/xgb_model.json")
+scaler = preprocessor.named_transformers_["num"]
+ohe = preprocessor.named_transformers_["cat"]
+
+config = {
+    "threshold": float(best_thr),
+    "scaler_mean": scaler.mean_.tolist(),
+    "scaler_scale": scaler.scale_.tolist(),
+    "categories": list(ohe.categories_[0]),
+    "num_cols": num_cols,
+    "feature_cols": FEATURE_COLS,
+    "user_input_cols": [
+        "type", "amount", "oldbalanceOrg", "newbalanceOrig",
+        "oldbalanceDest", "newbalanceDest"
+    ],
     "metrics": {
         "accuracy":  round(acc  * 100, 3),
         "precision": round(prec * 100, 2),
@@ -265,9 +273,13 @@ artifact = {
     },
 }
 
+with open("models/pipeline_config.json", "w") as f:
+    json.dump(config, f, indent=2)
+
 with open("models/paysim_pipeline.pkl", "wb") as f:
-    pickle.dump(artifact, f)
-print("  Saved to models/paysim_pipeline.pkl")
+    pickle.dump(config, f)
+
+print("  Saved to models/xgb_model.json and models/pipeline_config.json")
 
 # ─────────────────────────────────────────────────────────
 # 10. CREATE SAMPLE USER TRANSACTIONS CSV

@@ -1,0 +1,78 @@
+{
+  "threshold": 0.25000000000000006,
+  "scaler_mean": [
+    180146.42278850003,
+    798820.9441576666,
+    733534.7193089167,
+    598675.4713075834,
+    778357.387659,
+    114860.19793975001,
+    -464.5064370833331,
+    0.08335,
+    0.0010166666666666666,
+    4.186235981827491
+  ],
+  "scaler_scale": [
+    180224.3176417552,
+    798479.5363406244,
+    796706.5862036931,
+    598630.8417938675,
+    625351.5327354545,
+    167173.62432348114,
+    20102.24536907142,
+    0.27641052349720696,
+    0.03186899834565805,
+    396.3793397598801
+  ],
+  "categories": [
+    "CASH-IN",
+    "CASH-OUT",
+    "DEBIT",
+    "PAYMENT",
+    "TRANSFER"
+  ],
+  "num_cols": [
+    "amount",
+    "oldbalanceOrg",
+    "newbalanceOrig",
+    "oldbalanceDest",
+    "newbalanceDest",
+    "balance_diff_orig",
+    "balance_diff_dest",
+    "orig_drained",
+    "dest_unchanged",
+    "amount_to_balance"
+  ],
+  "feature_cols": [
+    "type",
+    "amount",
+    "oldbalanceOrg",
+    "newbalanceOrig",
+    "oldbalanceDest",
+    "newbalanceDest",
+    "balance_diff_orig",
+    "balance_diff_dest",
+    "orig_drained",
+    "dest_unchanged",
+    "amount_to_balance"
+  ],
+  "metrics": {
+    "accuracy": 99.99,
+    "precision": 100.0,
+    "recall": 93.33,
+    "f1": 96.55,
+    "roc_auc": 99.99,
+    "pr_auc": 96.63,
+    "cm": [
+      [
+        39940,
+        0
+      ],
+      [
+        4,
+        56
+      ]
+    ],
+    "test_size": 40000
+  }
+}
