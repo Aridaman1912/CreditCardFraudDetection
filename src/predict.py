@@ -5,141 +5,117 @@ import numpy as np
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_MODEL_PATH = BASE_DIR / "models" / "fraud_detection_model.pkl"
+DEFAULT_PIPELINE_PATH = BASE_DIR / "models" / "paysim_pipeline.pkl"
 
-REQUIRED_FEATURES = [
-    "Time", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10",
-    "V11", "V12", "V13", "V14", "V15", "V16", "V17", "V18", "V19", "V20",
-    "V21", "V22", "V23", "V24", "V25", "V26", "V27", "V28", "Amount"
+USER_INPUT_COLS = [
+    "type", "amount",
+    "oldbalanceOrg", "newbalanceOrig",
+    "oldbalanceDest", "newbalanceDest",
 ]
 
-TOP_SHAP_FEATURES = [
-    "V14", "V4", "V8", "V12", "V10", "V1", "V18", "V3", "V11", "V22"
-]
+TRANSACTION_TYPES = ["CASH-OUT", "CASH-IN", "PAYMENT", "TRANSFER", "DEBIT"]
 
 
-def load_artifacts(model_path: Union[str, Path] = DEFAULT_MODEL_PATH) -> Dict[str, Any]:
-    model_path = Path(model_path)
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model artifact not found at {model_path}.")
-
-    with open(model_path, "rb") as f:
-        artifacts = pickle.load(f)
-
-    for k in ["model", "scaler", "feature_names", "threshold"]:
-        if k not in artifacts:
-            raise KeyError(f"Artifact is missing key: '{k}'")
-
-    return artifacts
+def load_pipeline(path: Union[str, Path] = DEFAULT_PIPELINE_PATH) -> Dict[str, Any]:
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Pipeline artifact not found at {path}")
+    with open(path, "rb") as f:
+        artifact = pickle.load(f)
+    for key in ["preprocessor", "model", "threshold", "feature_cols"]:
+        if key not in artifact:
+            raise KeyError(f"Artifact missing key: '{key}'")
+    return artifact
 
 
-def validate_features(
-    input_data: Union[Dict[str, Any], pd.DataFrame],
-    feature_names: List[str]
-) -> Tuple[bool, str, List[str]]:
-    if isinstance(input_data, dict):
-        cols = list(input_data.keys())
-    elif isinstance(input_data, pd.DataFrame):
-        cols = list(input_data.columns)
-    else:
-        return False, "Input must be a dict or DataFrame.", []
+def _add_features(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["balance_diff_orig"] = df["newbalanceOrig"] - df["oldbalanceOrg"] + df["amount"]
+    df["balance_diff_dest"] = df["newbalanceDest"] - df["oldbalanceDest"] - df["amount"]
+    df["orig_drained"]      = (df["newbalanceOrig"] == 0).astype(int)
+    df["dest_unchanged"]    = (df["newbalanceDest"] == df["oldbalanceDest"]).astype(int)
+    df["amount_to_balance"] = df["amount"] / (df["oldbalanceOrg"] + 1)
+    return df
 
-    missing = [f for f in feature_names if f not in cols]
+
+def validate_user_csv(df: pd.DataFrame) -> Tuple[bool, str]:
+    missing = [c for c in USER_INPUT_COLS if c not in df.columns]
     if missing:
-        return False, f"Missing required columns: {missing}", missing
+        return False, f"Missing required columns: {missing}"
 
-    if isinstance(input_data, pd.DataFrame):
-        for f in feature_names:
-            if not pd.api.types.is_numeric_dtype(input_data[f]):
-                return False, f"Column '{f}' contains non-numeric values.", [f]
+    invalid_types = df["type"].dropna().unique().tolist()
+    bad = [t for t in invalid_types if t not in TRANSACTION_TYPES]
+    if bad:
+        return False, f"Invalid transaction type(s): {bad}. Allowed: {TRANSACTION_TYPES}"
 
-    return True, "OK", []
+    num_cols = [c for c in USER_INPUT_COLS if c != "type"]
+    for col in num_cols:
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            try:
+                df[col] = pd.to_numeric(df[col])
+            except Exception:
+                return False, f"Column '{col}' contains non-numeric values."
 
+    if (df["amount"] < 0).any():
+        return False, "Column 'amount' must not contain negative values."
 
-def predict_fraud(
-    transaction: Union[Dict[str, Any], pd.DataFrame],
-    artifacts: Dict[str, Any] = None
-) -> Dict[str, Any]:
-    if artifacts is None:
-        artifacts = load_artifacts()
-
-    model = artifacts["model"]
-    scaler = artifacts["scaler"]
-    feature_names = artifacts["feature_names"]
-    threshold = float(artifacts.get("threshold", 0.89))
-
-    if isinstance(transaction, dict):
-        is_valid, msg, _ = validate_features(transaction, feature_names)
-        if not is_valid:
-            raise ValueError(msg)
-        ordered = [float(transaction[col]) for col in feature_names]
-        input_df = pd.DataFrame([ordered], columns=feature_names)
-    elif isinstance(transaction, pd.DataFrame):
-        is_valid, msg, _ = validate_features(transaction, feature_names)
-        if not is_valid:
-            raise ValueError(msg)
-        input_df = transaction[feature_names].iloc[0:1].astype(float)
-    elif isinstance(transaction, (list, np.ndarray)):
-        if len(transaction) != len(feature_names):
-            raise ValueError(f"Expected {len(feature_names)} features, got {len(transaction)}.")
-        input_df = pd.DataFrame([list(transaction)], columns=feature_names, dtype=float)
-    else:
-        raise TypeError("transaction must be a dict, DataFrame, or list.")
-
-    scaled = scaler.transform(input_df)
-    proba = model.predict_proba(scaled)
-    fraud_prob = float(proba[0, 1])
-
-    is_fraud = fraud_prob >= threshold
-    return {
-        "fraud_probability": fraud_prob,
-        "fraud_probability_pct": fraud_prob * 100.0,
-        "prediction": "FRAUD" if is_fraud else "GENUINE",
-        "is_fraud": is_fraud,
-        "threshold": threshold,
-    }
+    return True, "OK"
 
 
-def predict_dataframe(
+def predict_transactions(
     df: pd.DataFrame,
-    artifacts: Dict[str, Any] = None
+    artifact: Dict[str, Any] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    if artifacts is None:
-        artifacts = load_artifacts()
+    if artifact is None:
+        artifact = load_pipeline()
 
-    model = artifacts["model"]
-    scaler = artifacts["scaler"]
-    feature_names = artifacts["feature_names"]
-    threshold = float(artifacts.get("threshold", 0.89))
+    preprocessor = artifact["preprocessor"]
+    model        = artifact["model"]
+    threshold    = float(artifact["threshold"])
+    feature_cols = artifact["feature_cols"]
 
-    df = df.drop(columns=["Class"], errors="ignore")
+    input_df = df[USER_INPUT_COLS].copy()
+    if len(input_df) == 0:
+        out = df.copy()
+        out["Fraud Probability (%)"] = []
+        out["Prediction"] = []
+        return out, {"total": 0, "flagged_fraud": 0, "genuine": 0,
+                     "fraud_rate_pct": 0.0, "threshold": threshold}
+    num_cols = [c for c in USER_INPUT_COLS if c != "type"]
+    for col in num_cols:
+        input_df[col] = pd.to_numeric(input_df[col], errors="coerce").fillna(0)
 
-    is_valid, msg, missing = validate_features(df, feature_names)
-    if not is_valid:
-        raise ValueError(msg)
+    enriched = _add_features(input_df)
+    X = enriched[feature_cols]
+    X_pre = preprocessor.transform(X)
 
-    input_df = df[feature_names].astype(float)
-    X_scaled = scaler.transform(input_df)
-
-    proba = model.predict_proba(X_scaled)[:, 1]
+    proba = model.predict_proba(X_pre)[:, 1]
     preds = np.where(proba >= threshold, "FRAUD", "GENUINE")
 
     out = df.copy()
-    out["Fraud Probability"] = np.round(proba, 4)
-    out["Fraud Probability (%)"] = np.round(proba * 100.0, 2)
-    out["Prediction"] = preds
+    out["Fraud Probability (%)"] = np.round(proba * 100, 2)
+    out["Prediction"]            = preds
 
-    n_fraud = int(np.sum(preds == "FRAUD"))
+    n_fraud = int((preds == "FRAUD").sum())
     summary = {
-        "total": len(df),
-        "flagged_fraud": n_fraud,
-        "genuine": len(df) - n_fraud,
-        "fraud_rate_pct": (n_fraud / len(df) * 100.0) if len(df) > 0 else 0.0,
-        "threshold": threshold,
+        "total":           len(df),
+        "flagged_fraud":   n_fraud,
+        "genuine":         len(df) - n_fraud,
+        "fraud_rate_pct":  round(n_fraud / len(df) * 100, 2) if len(df) > 0 else 0.0,
+        "threshold":       threshold,
     }
-
     return out, summary
 
 
-predict_single_transaction = predict_fraud
-predict_batch = predict_dataframe
+def predict_single(row: Dict[str, Any], artifact: Dict[str, Any] = None) -> Dict[str, Any]:
+    df = pd.DataFrame([row])
+    out, _ = predict_transactions(df, artifact)
+    prob     = float(out["Fraud Probability (%)"].iloc[0])
+    pred     = out["Prediction"].iloc[0]
+    is_fraud = pred == "FRAUD"
+    return {
+        "fraud_probability_pct": prob,
+        "prediction": pred,
+        "is_fraud": is_fraud,
+        "threshold": artifact["threshold"] if artifact else load_pipeline()["threshold"],
+    }
